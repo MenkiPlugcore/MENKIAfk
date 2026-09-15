@@ -27,6 +27,9 @@ jobs:
       - name: Copy MENKIAFK to repository root
         shell: bash
         run: |
+          cd target
+          git pull --rebase origin main
+          cd ..
           cp -a source/plugins/MENKIAFK/. target/
           cd target
           git config user.name "github-actions[bot]"
