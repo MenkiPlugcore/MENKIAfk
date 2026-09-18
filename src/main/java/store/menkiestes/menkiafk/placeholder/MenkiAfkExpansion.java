@@ -8,6 +8,7 @@ import store.menkiestes.menkiafk.stats.StatsManager;
 import store.menkiestes.menkiafk.util.Text;
 
 import java.util.Locale;
+import java.util.UUID;
 
 public final class MenkiAfkExpansion extends PlaceholderExpansion {
     private final MenkiAfkPlugin plugin;
@@ -36,6 +37,11 @@ public final class MenkiAfkExpansion extends PlaceholderExpansion {
     }
 
     @Override
+    public String getRequiredPlugin() {
+        return "MENKIAFK";
+    }
+
+    @Override
     public boolean persist() {
         return true;
     }
@@ -43,24 +49,30 @@ public final class MenkiAfkExpansion extends PlaceholderExpansion {
     @Override
     public String onRequest(OfflinePlayer player, String params) {
         if (player == null) return "";
-        StatsManager.Snapshot stats = statsManager.snapshot(player.getUniqueId());
 
-        return switch (params.toLowerCase(Locale.ROOT)) {
-            case "status" -> manager.placeholderStatus(player.getUniqueId());
-            case "reason" -> manager.placeholderReason(player.getUniqueId());
-            case "time" -> manager.placeholderTime(player.getUniqueId());
-            case "type" -> manager.placeholderType(player.getUniqueId());
-            case "last_afk" -> lastAfk(stats);
-            case "stats_today" -> Text.duration(stats.todayMillis());
-            case "stats_week" -> Text.duration(stats.weekMillis());
-            case "stats_total" -> Text.duration(stats.totalMillis());
-            case "stats_total_seconds" -> String.valueOf(stats.totalMillis() / 1_000L);
-            case "stats_total_minutes" -> String.valueOf(stats.totalMillis() / 60_000L);
-            case "stats_total_hours" -> String.valueOf(stats.totalMillis() / 3_600_000L);
-            case "stats_sessions" -> String.valueOf(stats.sessions());
-            case "stats_manual_sessions" -> String.valueOf(stats.manualSessions());
-            case "stats_auto_sessions" -> String.valueOf(stats.autoSessions());
-            case "stats_longest" -> Text.duration(stats.longestMillis());
+        UUID id = player.getUniqueId();
+        String key = params == null ? "" : params.toLowerCase(Locale.ROOT);
+
+        return switch (key) {
+            // Hot-path placeholders deliberately avoid StatsManager#snapshot().
+            // TAB/scoreboard plugins can request these very frequently.
+            case "status" -> manager.placeholderStatus(id);
+            case "reason" -> manager.placeholderReason(id);
+            case "time" -> manager.placeholderTime(id);
+            case "type" -> manager.placeholderType(id);
+
+            // Statistics are resolved lazily only when a stats placeholder is actually requested.
+            case "last_afk" -> lastAfk(statsManager.snapshot(id));
+            case "stats_today" -> Text.duration(statsManager.snapshot(id).todayMillis());
+            case "stats_week" -> Text.duration(statsManager.snapshot(id).weekMillis());
+            case "stats_total" -> Text.duration(statsManager.snapshot(id).totalMillis());
+            case "stats_total_seconds" -> String.valueOf(statsManager.snapshot(id).totalMillis() / 1_000L);
+            case "stats_total_minutes" -> String.valueOf(statsManager.snapshot(id).totalMillis() / 60_000L);
+            case "stats_total_hours" -> String.valueOf(statsManager.snapshot(id).totalMillis() / 3_600_000L);
+            case "stats_sessions" -> String.valueOf(statsManager.snapshot(id).sessions());
+            case "stats_manual_sessions" -> String.valueOf(statsManager.snapshot(id).manualSessions());
+            case "stats_auto_sessions" -> String.valueOf(statsManager.snapshot(id).autoSessions());
+            case "stats_longest" -> Text.duration(statsManager.snapshot(id).longestMillis());
             default -> null;
         };
     }
