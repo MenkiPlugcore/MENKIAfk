@@ -3,6 +3,11 @@ package store.menkiestes.menkiafk;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.server.PluginDisableEvent;
+import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -22,13 +27,14 @@ import store.menkiestes.menkiafk.stats.StatsManager;
 
 import java.util.Objects;
 
-public final class MenkiAfkPlugin extends JavaPlugin {
+public final class MenkiAfkPlugin extends JavaPlugin implements Listener {
     private AfkManager afkManager;
     private StatsManager statsManager;
     private MenkiAfkAPI publicApi;
     private BukkitTask autoAfkTask;
     private BukkitTask statsSaveTask;
     private boolean placeholderApiHooked;
+    private Object placeholderExpansion;
 
     @Override
     public void onEnable() {
@@ -39,6 +45,7 @@ public final class MenkiAfkPlugin extends JavaPlugin {
         getServer().getServicesManager().register(MenkiAfkAPI.class, publicApi, this, ServicePriority.Normal);
 
         registerCommands();
+        getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(new AfkCommandOverrideListener(this), this);
         getServer().getPluginManager().registerEvents(new ActivityListener(this, afkManager), this);
         getServer().getPluginManager().registerEvents(new ConnectionListener(afkManager), this);
@@ -58,6 +65,7 @@ public final class MenkiAfkPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        unhookPlaceholderApi();
         getServer().getServicesManager().unregisterAll(this);
         publicApi = null;
         if (autoAfkTask != null) autoAfkTask.cancel();
@@ -94,7 +102,10 @@ public final class MenkiAfkPlugin extends JavaPlugin {
     }
 
     private void hookPlaceholderApi() {
+        if (placeholderApiHooked && placeholderExpansion != null) return;
+
         placeholderApiHooked = false;
+        placeholderExpansion = null;
         if (!getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             getLogger().info("PlaceholderAPI tidak ditemukan. Placeholder MENKIAFK dinonaktifkan, core tetap berjalan.");
             return;
@@ -107,12 +118,50 @@ public final class MenkiAfkPlugin extends JavaPlugin {
                     .newInstance(this, afkManager, statsManager);
             Object registered = expansionClass.getMethod("register").invoke(expansion);
             placeholderApiHooked = Boolean.TRUE.equals(registered);
+            placeholderExpansion = placeholderApiHooked ? expansion : null;
             getLogger().info(placeholderApiHooked
                     ? "PlaceholderAPI hook aktif untuk status AFK dan statistik."
                     : "PlaceholderAPI ditemukan tetapi expansion MENKIAFK gagal diregistrasi.");
         } catch (Throwable throwable) {
             placeholderApiHooked = false;
+            placeholderExpansion = null;
             getLogger().warning("Gagal hook PlaceholderAPI: " + throwable.getMessage());
+        }
+    }
+
+    private void unhookPlaceholderApi() {
+        Object expansion = placeholderExpansion;
+        placeholderExpansion = null;
+        boolean wasHooked = placeholderApiHooked;
+        placeholderApiHooked = false;
+
+        if (!wasHooked || expansion == null) return;
+        if (!getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) return;
+
+        try {
+            Object unregistered = expansion.getClass().getMethod("unregister").invoke(expansion);
+            if (!Boolean.TRUE.equals(unregistered)) {
+                getLogger().warning("Expansion MENKIAFK tidak terdaftar saat proses unregister PlaceholderAPI.");
+            }
+        } catch (Throwable throwable) {
+            getLogger().warning("Gagal unregister PlaceholderAPI expansion MENKIAFK: " + throwable.getMessage());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPluginEnable(PluginEnableEvent event) {
+        if (event.getPlugin().getName().equalsIgnoreCase("PlaceholderAPI")) {
+            hookPlaceholderApi();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPluginDisable(PluginDisableEvent event) {
+        if (event.getPlugin().getName().equalsIgnoreCase("PlaceholderAPI")) {
+            // PlaceholderAPI owns its registry and clears expansions as it shuts down.
+            // Drop our stale reference so a later enable can register a fresh instance.
+            placeholderExpansion = null;
+            placeholderApiHooked = false;
         }
     }
 
@@ -137,6 +186,9 @@ public final class MenkiAfkPlugin extends JavaPlugin {
         statsManager.reloadSettings();
         restartAutoAfkTask();
         restartStatsSaveTask();
+        if (!placeholderApiHooked && getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            hookPlaceholderApi();
+        }
     }
 
     public MenkiAfkAPI getApi() {
